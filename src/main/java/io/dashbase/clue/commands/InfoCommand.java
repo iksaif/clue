@@ -2,13 +2,16 @@ package io.dashbase.clue.commands;
 
 import io.dashbase.clue.ClueContext;
 import io.dashbase.clue.LuceneContext;
+import java.lang.reflect.Field;
 import net.sourceforge.argparse4j.inf.ArgumentParser;
 import net.sourceforge.argparse4j.inf.Namespace;
+import org.apache.lucene.codecs.compressing.CompressingStoredFieldsReader;
 import org.apache.lucene.index.*;
 
 import java.io.IOException;
 import java.io.PrintStream;
 import java.util.*;
+import org.apache.lucene.util.packed.PackedInts;
 
 @Readonly
 public class InfoCommand extends ClueCommand {
@@ -96,11 +99,55 @@ public class InfoCommand extends ClueCommand {
     if (r instanceof DirectoryReader) {
       DirectoryReader dr = (DirectoryReader)r;
       SegmentInfos sis = SegmentInfos.readLatestCommit(dr.directory()); // read infos from dir
+      out.println("Lucene: " + sis.getCommitLuceneVersion());
+      out.println("Generation: " + sis.getGeneration());
       for (SegmentCommitInfo commitInfo : sis) {
-        if (commitInfo != null) {          
+        if (commitInfo != null) {
+          out.println("Commit info: " + commitInfo.toString());
+          out.println("Files: " + commitInfo.files());
+
           out.println("Codec found: " + commitInfo.info.getCodec().getName());
-          break;
         }
+      }
+      var context = dr.getContext();
+
+      var readersCtx = context.leaves();
+      for (var readerCtx : readersCtx) {
+        var reader = readerCtx.reader();
+
+        out.println("Reader: " + reader.toString());
+        out.println("Class: " + reader.getClass());
+        if (reader instanceof SegmentReader) {
+          var segReader = (SegmentReader) reader;
+          out.println("Live docs:" + segReader.getLiveDocs());
+          out.println("Hard Live docs:" + segReader.getHardLiveDocs());
+          out.println("Deleted docs:" + segReader.numDeletedDocs());
+
+          var fieldReader = segReader.getFieldsReader();
+          out.println("Seg reader: " + fieldReader);
+          if (fieldReader instanceof CompressingStoredFieldsReader) {
+            var compReader = (CompressingStoredFieldsReader) fieldReader;
+            out.println("comp reader: " + compReader);
+
+            Field numDirtyChunks = CompressingStoredFieldsReader.class.getDeclaredField("numDirtyChunks");
+            numDirtyChunks.setAccessible(true);
+
+            Field numChunks = CompressingStoredFieldsReader.class.getDeclaredField("numChunks");
+            numChunks.setAccessible(true);
+
+            Field packedIntsVersion = CompressingStoredFieldsReader.class.getDeclaredField("packedIntsVersion");
+            packedIntsVersion.setAccessible(true);
+
+
+            out.println("Dirty Chunks: " + numDirtyChunks.get(compReader));
+            out.println("Chunks: " + numChunks.get(compReader));
+            out.println("PackedIntsVersion: " + packedIntsVersion.get(compReader) + " " + PackedInts.VERSION_CURRENT);
+            out.println("%: " + 100 * (((float)(Long) numDirtyChunks.get(compReader)) / (Long) numChunks.get(compReader)));
+            out.println("===");
+          }
+        }
+
+
       }
     }
     
